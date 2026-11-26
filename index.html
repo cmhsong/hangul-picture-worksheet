@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한글 그림 학습지</title>
+<meta name="description" content="낱말과 문장을 넣으면 소리로 읽어 주고 그림을 붙여 A4 학습지로 만들어 주는 도구">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Jua&family=Nanum+Myeongjo:wght@700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top no-print">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">가</span>
+    <div>
+      <strong>한글 그림 학습지</strong>
+      <small>쓰기 · 읽기 · 그림 연결하기</small>
+    </div>
+  </div>
+  <div class="top-actions">
+    <div class="seg" role="group" aria-label="읽는 목소리" id="voiceSeg">
+      <button type="button" data-voice="female">여자 목소리</button>
+      <button type="button" data-voice="male">남자 목소리</button>
+    </div>
+    <button type="button" class="btn" id="btnSpeakAll">▶ 전체 듣기</button>
+    <button type="button" class="btn edit-only" id="btnShare">링크 공유</button>
+    <button type="button" class="btn view-only" id="btnEdit">이 학습지 고치기</button>
+    <button type="button" class="btn primary" id="btnPrint">A4 인쇄 · PDF</button>
+  </div>
+</header>
+
+<main>
+  <aside class="panel no-print edit-only" aria-label="학습지 만들기">
+
+    <section class="step">
+      <h2><span class="num">1</span>글자 넣기</h2>
+      <label class="hint" for="inputText">낱말이나 문장을 한 줄에 하나씩 적어 주세요.</label>
+      <textarea id="inputText" rows="4" placeholder="예)&#10;사과&#10;강아지가 뛰어요&#10;나는 아침에 일어나서 학교에 갑니다"></textarea>
+      <div class="row">
+        <button type="button" class="btn primary grow" id="btnAdd">＋ 낱말·문장 추가</button>
+        <button type="button" class="btn" id="btnAddPic">＋ 그림 추가</button>
+      </div>
+      <div class="row wrap chips" id="samples">
+        <span class="hint">예시 묶음</span>
+        <button type="button" class="chip" data-sample="fruit">과일</button>
+        <button type="button" class="chip" data-sample="animal">동물</button>
+        <button type="button" class="chip" data-sample="school">학교생활</button>
+        <button type="button" class="chip" data-sample="feel">마음</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">2</span>학습지 꾸미기</h2>
+
+      <label class="field"><span>제목</span>
+        <input type="text" id="title" maxlength="40">
+      </label>
+
+      <div class="field"><span>학습지 종류</span>
+        <div class="seg full" id="layoutSeg">
+          <button type="button" data-layout="card">그림 카드</button>
+          <button type="button" data-layout="trace">따라 쓰기</button>
+          <button type="button" data-layout="match">선 잇기</button>
+        </div>
+      </div>
+
+      <div class="field"><span>그림 모양</span>
+        <div class="seg full" id="styleSeg">
+          <button type="button" data-style="noto">구글 그림</button>
+          <button type="button" data-style="pixel">도트 그림</button>
+          <button type="button" data-style="photo">사진</button>
+        </div>
+      </div>
+
+      <label class="field" id="pixelField"><span>도트 크기 <output id="pixelOut"></output></span>
+        <input type="range" id="pixelN" min="16" max="64" step="4">
+      </label>
+
+      <div class="field" id="colsField"><span>한 줄에 놓을 카드</span>
+        <div class="seg full" id="colsSeg">
+          <button type="button" data-cols="1">1장</button>
+          <button type="button" data-cols="2">2장</button>
+          <button type="button" data-cols="3">3장</button>
+        </div>
+      </div>
+
+      <div class="field"><span>글씨체</span>
+        <div class="seg full" id="fontSeg">
+          <button type="button" data-font="gothic">고딕</button>
+          <button type="button" data-font="hand">손글씨</button>
+          <button type="button" data-font="serif">명조</button>
+        </div>
+      </div>
+
+      <label class="field"><span>읽는 빠르기 <output id="rateOut"></output></span>
+        <input type="range" id="rate" min="0.5" max="1.3" step="0.05">
+      </label>
+      <p class="note" id="voiceNote"></p>
+
+      <label class="field"><span>안내 문구</span>
+        <input type="text" id="guide" maxlength="60">
+      </label>
+
+      <div class="row wrap checks">
+        <label><input type="checkbox" id="showName"> 이름·날짜 칸</label>
+        <label><input type="checkbox" id="showQR"> 소리 듣기 QR</label>
+        <button type="button" class="btn small" id="btnShuffle">선 잇기 다시 섞기</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">3</span>낱말·문장 다듬기 <span class="count" id="count"></span></h2>
+      <p class="hint">그림을 누르면 다른 그림으로 바꿀 수 있어요.</p>
+      <ol class="items" id="items"></ol>
+      <div class="row wrap">
+        <button type="button" class="btn small" id="btnSave">파일로 저장</button>
+        <label class="btn small" for="fileLoad">불러오기</label>
+        <input type="file" id="fileLoad" accept="application/json,.json" hidden>
+        <button type="button" class="btn small danger" id="btnClear">모두 지우기</button>
+      </div>
+    </section>
+
+    <footer class="credits">
+      그림 <a href="https://github.com/googlefonts/noto-emoji" target="_blank" rel="noopener">Google Noto Emoji</a> ·
+      낱말 사전 <a href="https://github.com/milesj/emojibase" target="_blank" rel="noopener">emojibase</a> ·
+      사진 <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">위키미디어 공용</a> ·
+      <a href="https://github.com/pieroxy/lz-string" target="_blank" rel="noopener">lz-string</a> ·
+      <a href="https://github.com/kazuhikoarase/qrcode-generator" target="_blank" rel="noopener">qrcode-generator</a>
+    </footer>
+  </aside>
+
+  <section class="stage" id="stage" aria-label="학습지 미리 보기">
+    <div id="pages"></div>
+  </section>
+</main>
+
+<!-- 그림 고르기 -->
+<dialog id="picker" class="modal no-print">
+  <form method="dialog" class="modal-head">
+    <h3>그림 고르기</h3>
+    <button class="icon-btn" aria-label="닫기">✕</button>
+  </form>
+  <div class="modal-body">
+    <div class="row">
+      <input type="search" id="pickQ" placeholder="찾을 낱말 (예: 고양이)">
+      <button type="button" class="btn primary" id="pickSearch">찾기</button>
+    </div>
+
+    <h4>구글 그림 <small>Noto Emoji</small></h4>
+    <div class="grid" id="pickEmoji"></div>
+
+    <h4>사진 <small>위키백과 · 위키미디어 공용 (자유 이용 사진)</small></h4>
+    <div class="grid photos" id="pickPhoto"></div>
+
+    <h4>내 그림 넣기</h4>
+    <div class="row wrap">
+      <label class="btn" for="pickFile">내 컴퓨터에서 올리기</label>
+      <input type="file" id="pickFile" accept="image/*" hidden>
+      <a class="btn" id="pickGoogle" target="_blank" rel="noopener">구글에서 무료 이미지 찾기 ↗</a>
+    </div>
+    <div class="row">
+      <input type="url" id="pickUrl" placeholder="그림 주소 붙여넣기 (https://…)">
+      <button type="button" class="btn" id="pickUrlOk">넣기</button>
+    </div>
+    <p class="note">구글에서 찾은 그림은 복사한 뒤 이 창에서 <kbd>Ctrl</kbd>+<kbd>V</kbd> 로 바로 붙여넣을 수 있어요.</p>
+  </div>
+  <div class="modal-foot">
+    <label><input type="checkbox" id="pickPixel"> 도트 그림으로 바꾸기</label>
+    <button type="button" class="btn danger" id="pickNone">그림 빼기</button>
+  </div>
+</dialog>
+
+<!-- 링크 공유 -->
+<dialog id="share" class="modal small no-print">
+  <form method="dialog" class="modal-head">
+    <h3>링크로 나누기</h3>
+    <button class="icon-btn" aria-label="닫기">✕</button>
+  </form>
+  <div class="modal-body">
+    <p>이 주소를 열면 학습지를 보고, 그림을 눌러 소리로 들을 수 있어요.</p>
+    <div class="row">
+      <input type="text" id="shareUrl" readonly>
+      <button type="button" class="btn primary" id="shareCopy">주소 복사</button>
+    </div>
+    <div id="shareQR" class="qr-box"></div>
+    <p class="note" id="shareNote"></p>
+  </div>
+</dialog>
+
+<div class="toast no-print" id="toast" role="status" hidden></div>
+
+<script src="vendor/emoji-ko.js"></script>
+<script src="vendor/lz-string.min.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
