@@ -307,9 +307,11 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 .cols-1 { --pic: 40mm; --fs: 30pt; }
 .cols-2 { --pic: 48mm; --fs: 26pt; }
 .cols-3 { --pic: 34mm; --fs: 18pt; }
-.cols-1 .t-short { --fs: 24pt; } .cols-1 .t-long { --fs: 18pt; }
-.cols-2 .t-short { --fs: 18pt; } .cols-2 .t-long { --fs: 14pt; }
-.cols-3 .t-short { --fs: 13pt; } .cols-3 .t-long { --fs: 10.5pt; }
+/* 자동 줄바꿈이 켜져 있으면 문장도 낱말과 같은 크기로 두고 어절 단위로 줄을 바꾼다.
+   줄바꿈을 끈 경우에만 문장 글씨를 작게 시작해 한 줄에 맞춘다. */
+.cols-1.nowrap .t-short { --fs: 24pt; } .cols-1.nowrap .t-long { --fs: 18pt; }
+.cols-2.nowrap .t-short { --fs: 18pt; } .cols-2.nowrap .t-long { --fs: 14pt; }
+.cols-3.nowrap .t-short { --fs: 13pt; } .cols-3.nowrap .t-long { --fs: 10.5pt; }
 .card.no-pic { min-height: 24mm; }
 
 /* 따라 쓰기 */
