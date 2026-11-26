@@ -811,6 +811,71 @@ async function chooseFile(file) {
   try { choose({ kind: 'data', src: await fileToDataUrl(file) }); } catch (e) { toast('이 그림은 열 수 없어요. 다른 파일로 해 보세요.'); }
 }
 
+/* ── 사진 찍기: 기기 카메라로 바로 찍어 넣는다 ── */
+let camStream = null, camFacing = 'environment', camData = '', camToken = 0;
+function camStop() {
+  camToken++;
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null;
+  $('#camVideo').srcObject = null;
+}
+function camMode(shot) { // shot: 찍은 사진을 보여 주는 중
+  $('#camVideo').hidden = shot; $('#camShot').hidden = !shot;
+  $('#camSnap').hidden = shot; $('#camUse').hidden = !shot; $('#camRetry').hidden = !shot;
+  if (shot) $('#camFlip').hidden = true;
+}
+/** 카메라를 쓸 수 없을 때: 휴대 기기는 기본 카메라 앱이, 컴퓨터는 파일 고르기가 열린다 */
+function camFallback(msg) {
+  if ($('#camera').open) $('#camera').close();
+  if (msg) toast(msg);
+  try { $('#pickCamFile').click(); } catch (e) { /* 막히면 안내만 */ }
+}
+async function camStart() {
+  camStop();
+  const my = camToken, v = $('#camVideo'), md = navigator.mediaDevices;
+  camData = ''; camMode(false);
+  $('#camSnap').disabled = true; $('#camFlip').hidden = true;
+  $('#camNote').textContent = '카메라를 켜는 중이에요…';
+  let stream;
+  try {
+    try { stream = await md.getUserMedia({ audio: false, video: { facingMode: { ideal: camFacing }, width: { ideal: 1280 }, height: { ideal: 960 } } }); }
+    catch (e) { if (e.name !== 'OverconstrainedError') throw e; stream = await md.getUserMedia({ audio: false, video: true }); }
+  } catch (e) {
+    if (my !== camToken) return;
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
+      $('#camera').close();
+      toast('카메라를 쓸 수 있게 허락해 주세요. 주소창 옆 카메라 표시에서 바꿀 수 있어요.');
+    } else camFallback(e.name === 'NotFoundError' ? '이 기기에서 카메라를 찾지 못했어요.' : '카메라를 켜지 못했어요. 다른 프로그램이 쓰고 있는지 확인해 주세요.');
+    return;
+  }
+  if (my !== camToken || !$('#camera').open) { stream.getTracks().forEach(t => t.stop()); return; }
+  camStream = stream;
+  v.srcObject = stream;
+  v.classList.toggle('mirror', stream.getVideoTracks()[0]?.getSettings?.().facingMode === 'user'); // 앞 카메라는 거울처럼 보여 준다
+  v.play?.().catch(() => { /* autoplay 속성으로 재생 */ });
+  $('#camSnap').disabled = false;
+  $('#camNote').textContent = '넣고 싶은 것을 화면 가운데에 두고 「찍기」를 눌러 주세요.';
+  try { $('#camFlip').hidden = (await md.enumerateDevices()).filter(d => d.kind === 'videoinput').length < 2 || my !== camToken; } catch (e) { /* 하나뿐인 것으로 둔다 */ }
+}
+function openCamera() {
+  if (!pickItem) return;
+  if (!navigator.mediaDevices?.getUserMedia) { camFallback(); return; }
+  $('#camera').showModal();
+  camStart();
+}
+function camSnap() {
+  const v = $('#camVideo');
+  if (!v.videoWidth) return;
+  const r = Math.min(1, 1000 / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(v.videoWidth * r); c.height = Math.round(v.videoHeight * r);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  camData = c.toDataURL('image/jpeg', 0.86);
+  $('#camShot').src = camData;
+  camMode(true);
+  $('#camNote').textContent = '마음에 들면 「이 사진 쓰기」를, 아니면 「다시 찍기」를 눌러 주세요.';
+  camStop(); // 사진을 보는 동안에는 카메라를 끈다
+}
+
 /** 자동으로 붙인 그림을 지금 설정에 맞게 다시 고른다 (직접 고른 그림은 그대로) */
 async function reAuto() {
   await Promise.all(state.items.filter(it => it.auto && it.text.trim()).map(autoImage));
@@ -886,6 +951,13 @@ function bind() {
   $('#pickSearch').onclick = () => pickGrid($('#pickQ').value.trim());
   $('#pickQ').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pickGrid($('#pickQ').value.trim()); } });
   $('#pickFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; chooseFile(f); };
+  $('#pickCam').onclick = openCamera;
+  $('#pickCamFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) chooseFile(f); };
+  $('#camSnap').onclick = camSnap;
+  $('#camRetry').onclick = camStart;
+  $('#camFlip').onclick = () => { camFacing = camFacing === 'user' ? 'environment' : 'user'; camStart(); };
+  $('#camUse').onclick = () => { const src = camData; $('#camera').close(); if (src) choose({ kind: 'data', src }); };
+  $('#camera').addEventListener('close', () => { camStop(); camData = ''; $('#camShot').removeAttribute('src'); });
   const urlOk = () => { const u = $('#pickUrl').value.trim(); if (/^(https?:|data:image\/)/.test(u)) choose(u.startsWith('data:') ? { kind: 'data', src: u } : { kind: 'url', src: u }); else toast('https:// 로 시작하는 그림 주소를 넣어 주세요.'); };
   $('#pickUrlOk').onclick = urlOk;
   $('#pickUrl').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); urlOk(); } });
@@ -910,7 +982,7 @@ function bind() {
     $('#shareQR').innerHTML = qr && !local ? `<img src="${qr}" alt="학습지 주소 QR">` : '';
     $('#shareNote').textContent = [
       local && '지금은 내 컴퓨터에서 연 화면이라, 이 주소는 이 컴퓨터에서만 열려요. 인터넷에 올린 주소에서 만들면 누구나 열 수 있어요.',
-      lost && `내 컴퓨터에서 올린 그림 ${lost}개는 주소에 담을 수 없어 빠져요.`,
+      lost && `직접 올리거나 찍은 그림 ${lost}개는 주소에 담을 수 없어 빠져요.`,
       !qr && !local && '글이 많아 QR은 만들지 못했어요. 주소를 복사해 보내 주세요.',
     ].filter(Boolean).join(' ');
     $('#share').showModal();

@@ -222,6 +222,8 @@
 
     <h4>내 그림 넣기</h4>
     <div class="row wrap">
+      <button type="button" class="btn" id="pickCam">📷 사진 찍기</button>
+      <input type="file" id="pickCamFile" accept="image/*" capture="environment" hidden>
       <label class="btn" for="pickFile">내 컴퓨터에서 올리기</label>
       <input type="file" id="pickFile" accept="image/*" hidden>
       <a class="btn" id="pickGoogle" target="_blank" rel="noopener">구글에서 무료 이미지 찾기 ↗</a>
@@ -235,6 +237,27 @@
   <div class="modal-foot">
     <label><input type="checkbox" id="pickPixel"> 도트 그림으로 바꾸기</label>
     <button type="button" class="btn danger" id="pickNone">이 그림 빼기</button>
+  </div>
+</dialog>
+
+<!-- 사진 찍기 -->
+<dialog id="camera" class="modal small no-print">
+  <form method="dialog" class="modal-head">
+    <h3>사진 찍기</h3>
+    <button class="icon-btn" aria-label="닫기">✕</button>
+  </form>
+  <div class="modal-body">
+    <div class="cam-view">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <img id="camShot" alt="찍은 사진" hidden>
+    </div>
+    <p class="note" id="camNote"></p>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn" id="camFlip">카메라 바꾸기</button>
+    <button type="button" class="btn" id="camRetry" hidden>다시 찍기</button>
+    <button type="button" class="btn primary" id="camSnap">● 찍기</button>
+    <button type="button" class="btn primary" id="camUse" hidden>이 사진 쓰기</button>
   </div>
 </dialog>
 
