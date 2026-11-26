@@ -22,7 +22,7 @@ const SAMPLES = {
 const DEFAULT = {
   title: '한글 읽기 · 쓰기', layout: 'card', cols: 2, imgStyle: 'noto', pixelN: 32,
   voice: 'female', rate: 0.85, showName: true, showQR: false, font: 'gothic',
-  guide: {}, seed: 1, items: [],
+  guide: {}, seed: 1, multi: true, fontScale: 1, wrap: true, volume: 1, zoom: 'fit', items: [],
 };
 
 let state = structuredClone(DEFAULT);
@@ -104,7 +104,9 @@ function findEmoji(text) {
   const list = [];
   ordered.forEach(h => list.push(h.list[0]));
   ordered.forEach(h => list.push(...h.list.slice(1, 8)));
-  return { list: [...new Set(list)], key: ordered[0]?.key || '' };
+  const heads = [], keys = []; // 글에 나온 순서대로, 낱말마다 하나씩
+  hits.forEach(h => { if (!heads.includes(h.list[0])) { heads.push(h.list[0]); keys.push(h.key); } });
+  return { list: [...new Set(list)], key: ordered[0]?.key || '', heads, keys };
 }
 /** 고르기 창에서 쓰는 넓은 찾기(포함하는 이름까지). */
 function searchEmoji(q) {
@@ -117,14 +119,14 @@ function searchEmoji(q) {
   return [...new Set(out)].slice(0, 48);
 }
 /** 사진을 찾을 때 쓸 낱말 후보(아는 낱말 먼저). */
-function photoKeys(text) {
+function photoKeys(text, knownOnly) {
   const known = [], rest = [];
   tokens(text).slice(0, 5).forEach(tok => {
     const m = matchToken(tok);
     if (m && !m.verb) known.push(m.key);
     else stems(tok).slice(0, 2).forEach(s => { if (!STOP.has(s) && s.length > 1) rest.push(s); });
   });
-  return [...new Set([...known, ...rest])].slice(0, 8);
+  return [...new Set(knownOnly ? known : [...known, ...rest])].slice(0, 8);
 }
 
 const emojiHex = ch => Array.from(ch).map(c => c.codePointAt(0).toString(16)).filter(h => h !== 'fe0f').join('_');
@@ -142,18 +144,19 @@ function glyphUrl(ch) { // 구글 그림을 못 받았을 때: 기기 글꼴로 
 const WIKI = 'https://ko.wikipedia.org/w/api.php?format=json&origin=*&action=query&';
 const COMMONS = 'https://commons.wikimedia.org/w/api.php?format=json&origin=*&action=query&';
 async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(r.status); return r.json(); }
-async function wikiExact(keys) {
-  if (!keys.length) return null;
+async function wikiPhotos(keys) { // 낱말마다 위키백과 대표 사진 하나씩
+  if (!keys.length) return [];
   const j = await getJSON(WIKI + 'redirects=1&prop=pageimages&piprop=thumbnail&pithumbsize=500&titles=' + encodeURIComponent(keys.join('|')));
   const pages = Object.values(j.query?.pages || {});
   const map = {};
   [...(j.query?.normalized || []), ...(j.query?.redirects || [])].forEach(r => { map[r.from] = r.to; });
+  const out = [];
   for (const k of keys) {
     let t = k; for (let n = 0; n < 3 && map[t]; n++) t = map[t];
     const p = pages.find(p => p.title === t && p.thumbnail);
-    if (p) return { src: p.thumbnail.source, credit: p.title };
+    if (p && !out.some(o => o.src === p.thumbnail.source)) out.push({ src: p.thumbnail.source, credit: p.title });
   }
-  return null;
+  return out;
 }
 async function photoSearch(q) {
   const enc = encodeURIComponent(q);
@@ -211,8 +214,7 @@ async function pixelate(src, n) {
 }
 
 const baseSrc = img => !img ? '' : img.kind === 'emoji' ? notoUrl(img.ch) : img.src;
-async function setImg(el, item) {
-  const img = item.img;
+async function setImg(el, item, img) {
   if (!img) return;
   const base = baseSrc(img);
   const token = el._t = (el._t || 0) + 1;
@@ -225,31 +227,14 @@ async function setImg(el, item) {
   if (img.kind === 'emoji') el.onerror = () => { el.onerror = null; el.src = glyphUrl(img.ch); };
   put(base);
 }
-function picEl(item, cls = 'pic') {
+function picEl(item, img, cls = 'pic') {
   const el = document.createElement('img');
   el.className = cls; el.alt = item.text || '그림'; el.decoding = 'async';
-  setImg(el, item);
+  setImg(el, item, img);
   return el;
 }
 
 /* ══════════ 그림 자동으로 붙이기 ══════════ */
-async function autoImage(item) {
-  const text = item.text;
-  const em = findEmoji(text).list;
-  const tryPhoto = async () => {
-    try {
-      const p = await wikiExact(photoKeys(text));
-      if (p && item.text === text && item.auto) { item.img = { kind: 'url', src: p.src, credit: p.credit }; return true; }
-    } catch (e) { /* 인터넷이 없으면 그림 없이 둔다 */ }
-    return false;
-  };
-  if (state.imgStyle === 'photo' && await tryPhoto()) return;
-  if (item.text !== text || !item.auto) return;
-  if (em.length) { item.img = { kind: 'emoji', ch: em[0] }; return; }
-  if (state.imgStyle !== 'photo' && await tryPhoto()) return;
-  if (item.text === text && item.auto) item.img = null;
-}
-
 const classify = text => {
   const t = (text || '').trim(), n = Array.from(t).length;
   if (!t) return 'pic';
@@ -257,15 +242,46 @@ const classify = text => {
   return n <= 16 ? 'short' : 'long';
 };
 const TYPE_NAME = { word: '낱말', short: '짧은 문장', long: '긴 문장', pic: '그림만' };
+const MAX_PICS = 4;
+/** 낱말은 그림 하나, 문장은(설정에 따라) 낱말마다 작은 그림 여러 개 */
+const wantCount = item => (state.multi && classify(item.text) !== 'word') ? MAX_PICS : 1;
+function emojiPicks(item) {
+  const f = findEmoji(item.text), n = wantCount(item);
+  return (n > 1 ? f.heads.slice(0, n) : f.list.slice(0, 1)).map(ch => ({ kind: 'emoji', ch }));
+}
+async function autoImage(item) {
+  const text = item.text, n = wantCount(item);
+  const still = () => item.text === text && item.auto;
+  const photos = async () => {
+    try {
+      let keys = n > 1 ? photoKeys(text, true) : [], max = n;
+      if (!keys.length) { keys = photoKeys(text); max = 1; }
+      const ps = (await wikiPhotos(keys)).slice(0, max);
+      if (ps.length && still()) { item.imgs = ps.map(p => ({ kind: 'url', src: p.src, credit: p.credit })); return true; }
+    } catch (e) { /* 인터넷이 없으면 그림 없이 둔다 */ }
+    return false;
+  };
+  if (state.imgStyle === 'photo' && await photos()) return;
+  if (!still()) return;
+  const em = emojiPicks(item);
+  if (em.length) { item.imgs = em; return; }
+  if (state.imgStyle !== 'photo' && await photos()) return;
+  if (still()) item.imgs = [];
+}
+/** 예전에 저장한 학습지(그림 하나짜리)를 지금 모양으로 맞춘다 */
+function norm(st) {
+  st.items.forEach(it => { if (!Array.isArray(it.imgs)) it.imgs = it.img ? [it.img] : []; delete it.img; });
+  return st;
+}
 
 async function addTexts(lines) {
   const fresh = lines.map(s => s.trim()).filter(Boolean)
-    .map(text => ({ id: newId(), text, img: null, auto: true, pixel: state.imgStyle === 'pixel' }));
+    .map(text => ({ id: newId(), text, imgs: [], auto: true, pixel: state.imgStyle === 'pixel' }));
   if (!fresh.length) return;
   state.items.push(...fresh);
-  fresh.forEach(it => { const em = findEmoji(it.text).list; if (em.length) it.img = { kind: 'emoji', ch: em[0] }; });
+  fresh.forEach(it => { it.imgs = emojiPicks(it); });
   render();
-  await Promise.all(fresh.filter(it => !it.img || state.imgStyle === 'photo').map(autoImage));
+  await Promise.all(fresh.filter(it => !it.imgs.length || state.imgStyle === 'photo').map(autoImage));
   render();
 }
 
@@ -318,7 +334,7 @@ function speakText(text, my, done) {
     const u = keep = new SpeechSynthesisUtterance(parts[k++]);
     const { voice, pitch } = pickVoice(state.voice);
     u.lang = 'ko-KR'; if (voice) u.voice = voice;
-    u.pitch = pitch; u.rate = state.rate;
+    u.pitch = pitch; u.rate = state.rate; u.volume = state.volume;
     u.onend = go; u.onerror = go;
     synth.speak(u);
   };
@@ -352,26 +368,37 @@ function sayBtn(item) {
   b.onclick = e => { e.stopPropagation(); speakItems([item]); };
   return b;
 }
-function picButton(item, cls) {
-  const b = h('button', 'pic-btn'); b.type = 'button';
-  b.title = viewer ? '눌러서 듣기' : '눌러서 그림 바꾸기';
-  b.appendChild(picEl(item, cls));
-  b.onclick = () => viewer ? speakItems([item]) : openPicker(item);
-  return b;
+function picsEl(item) {
+  const box = h('div', 'pics n-' + item.imgs.length);
+  item.imgs.forEach((img, i) => {
+    const b = h('button', 'pic-btn'); b.type = 'button';
+    b.title = viewer ? '눌러서 듣기' : '눌러서 그림 바꾸기';
+    b.appendChild(picEl(item, img));
+    b.onclick = () => viewer ? speakItems([item]) : openPicker(item, i);
+    box.appendChild(b);
+  });
+  return box;
+}
+/** 줄바꿈을 끈 경우: 한 줄에 들어갈 때까지 글씨를 줄인다 */
+function fitText(block) {
+  $$('.txt, .r', block).forEach(el => {
+    let fs = parseFloat(getComputedStyle(el).fontSize);
+    for (let n = 0; n < 40 && el.scrollWidth > el.clientWidth + 1 && fs > 9; n++) { fs *= 0.95; el.style.fontSize = fs + 'px'; }
+  });
 }
 
 function cardBlock(item) {
   const type = classify(item.text);
-  const el = h('div', `card t-${type}${item.img ? '' : ' no-pic'}`);
+  const el = h('div', `card t-${type}${item.imgs.length ? '' : ' no-pic'}`);
   el.dataset.id = item.id;
-  if (item.img) el.appendChild(picButton(item));
+  if (item.imgs.length) el.appendChild(picsEl(item));
   if (item.text.trim()) { el.appendChild(h('div', 'txt', esc(item.text))); el.appendChild(sayBtn(item)); }
   return el;
 }
 function traceBlock(item) {
   const type = classify(item.text);
-  const b = type === 'word' ? 14 : type === 'short' ? 11 : 9.5;
-  const per = Math.floor((item.img ? 146 : 180) / b);
+  const b = Math.min(22, Math.round((type === 'word' ? 14 : type === 'short' ? 11 : 9.5) * state.fontScale * 10) / 10);
+  const per = Math.max(2, Math.floor((item.imgs.length ? 146 : 180) / b)); // 한 줄 칸 수 — 넘치면 다음 줄로
   const chars = Array.from(item.text.trim());
   const lines = [];
   let cur = [];
@@ -382,7 +409,7 @@ function traceBlock(item) {
   });
   if (cur.length) lines.push(cur);
   const el = h('div', 'trow'); el.dataset.id = item.id;
-  if (item.img) el.appendChild(picButton(item));
+  if (item.imgs.length) el.appendChild(picsEl(item));
   const tl = h('div', 'tlines'); tl.style.setProperty('--b', b + 'mm');
   const read = h('div', 'tread', esc(item.text));
   read.appendChild(sayBtn(item));
@@ -397,7 +424,7 @@ function traceBlock(item) {
 }
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function matchBlocks(items) {
-  const usable = items.filter(it => it.img && it.text.trim());
+  const usable = items.filter(it => it.imgs.length && it.text.trim());
   const out = [];
   const groups = Math.ceil(usable.length / 5), size = Math.ceil(usable.length / (groups || 1)); // 한 쪽 5개까지, 고르게 나눈다
   for (let g = 0; g < groups; g++) {
@@ -410,7 +437,7 @@ function matchBlocks(items) {
     group.forEach((it, i) => {
       const row = h('div', 'mrow');
       const l = h('div', 'l'); l.dataset.id = it.id;
-      l.appendChild(picButton(it)); l.appendChild(sayBtn(it));
+      l.appendChild(picsEl(it)); l.appendChild(sayBtn(it));
       const rt = right[i];
       const r = h('div', `r t-${classify(rt.text)}`, esc(rt.text)); r.dataset.id = rt.id;
       row.append(l, h('span', 'dot'), h('span'), h('span', 'dot'), r);
@@ -424,8 +451,8 @@ function matchBlocks(items) {
 function shareUrl() {
   const slim = {
     t: state.title, l: state.layout, c: state.cols, s: state.imgStyle, p: state.pixelN, v: state.voice, r: state.rate,
-    n: state.showName ? 1 : 0, f: state.font, g: state.guide, d: state.seed,
-    i: state.items.map(it => [it.text, !it.img ? '' : it.img.kind === 'emoji' ? 'e:' + it.img.ch : it.img.kind === 'url' ? 'u:' + it.img.src : '', it.pixel ? 1 : 0]),
+    n: state.showName ? 1 : 0, f: state.font, g: state.guide, d: state.seed, z: state.fontScale, w: state.wrap ? 1 : 0,
+    i: state.items.map(it => [it.text, it.imgs.map(im => im.kind === 'emoji' ? 'e:' + im.ch : im.kind === 'url' ? 'u:' + im.src : '').filter(Boolean), it.pixel ? 1 : 0]),
   };
   return location.href.split('#')[0] + '#v=' + LZString.compressToEncodedURIComponent(JSON.stringify(slim));
 }
@@ -433,10 +460,10 @@ function fromShare(code) {
   const o = JSON.parse(LZString.decompressFromEncodedURIComponent(code));
   return {
     ...structuredClone(DEFAULT), title: o.t, layout: o.l, cols: o.c, imgStyle: o.s, pixelN: o.p, voice: o.v, rate: o.r,
-    showName: !!o.n, font: o.f, guide: o.g || {}, seed: o.d || 1,
+    showName: !!o.n, font: o.f, guide: o.g || {}, seed: o.d || 1, fontScale: o.z || 1, wrap: o.w !== 0,
     items: (o.i || []).map(([text, im, px]) => ({
       id: newId(), text, pixel: !!px, auto: false,
-      img: !im ? null : im.startsWith('e:') ? { kind: 'emoji', ch: im.slice(2) } : { kind: 'url', src: im.slice(2) },
+      imgs: (Array.isArray(im) ? im : im ? [im] : []).map(c => c.startsWith('e:') ? { kind: 'emoji', ch: c.slice(2) } : { kind: 'url', src: c.slice(2) }),
     })),
   };
 }
@@ -450,14 +477,15 @@ function renderPages() {
   wrap.innerHTML = '';
   const { layout } = state;
   const blocks = layout === 'match' ? matchBlocks(state.items)
-    : state.items.filter(it => it.img || it.text.trim()).map(layout === 'trace' ? traceBlock : cardBlock);
-  const usesPhoto = state.items.some(it => it.img && it.img.kind === 'url');
-  const usesNoto = state.items.some(it => it.img && it.img.kind === 'emoji');
+    : state.items.filter(it => it.imgs.length || it.text.trim()).map(layout === 'trace' ? traceBlock : cardBlock);
+  const usesPhoto = state.items.some(it => it.imgs.some(im => im.kind !== 'emoji'));
+  const usesNoto = state.items.some(it => it.imgs.some(im => im.kind === 'emoji'));
   const credit = [usesNoto && 'Google Noto Emoji', usesPhoto && '위키미디어 공용 등'].filter(Boolean).join(' · ');
   const pages = [];
 
   const newPage = first => {
     const page = h('div', `page f-${state.font}`);
+    page.style.setProperty('--u', state.fontScale);
     if (first) {
       const head = h('div', 'sheet-head');
       const t = h('div', 't');
@@ -473,7 +501,7 @@ function renderPages() {
     } else {
       page.appendChild(h('div', 'sheet-cont', esc(state.title || '학습지')));
     }
-    const body = h('div', `sheet-body body-${layout}${layout === 'card' ? ' cols-' + state.cols : ''}`);
+    const body = h('div', `sheet-body body-${layout}${layout === 'card' ? ' cols-' + state.cols : ''}${state.wrap ? '' : ' nowrap'}`);
     if (layout === 'card') body.style.setProperty('--cols', state.cols);
     page.appendChild(body);
     const foot = h('div', 'sheet-foot', `<span>${credit ? '그림: ' + esc(credit) : ''}</span><span class="pn"></span>`);
@@ -492,6 +520,7 @@ function renderPages() {
   }
   for (const b of blocks) {
     body.appendChild(b);
+    if (!state.wrap) fitText(b);
     if (body.scrollHeight > body.clientHeight + 1 && body.children.length > 1) {
       b.remove();
       body = newPage(false);
@@ -501,13 +530,17 @@ function renderPages() {
   pages.forEach((p, i) => { $('.pn', p).textContent = `${i + 1} / ${pages.length}`; });
   fitZoom();
 }
+let curZ = 1;
+/** 미리 보기 크기: '화면 맞춤'이면 창 너비에 맞추고, 아니면 고른 배율 그대로 (인쇄는 늘 A4 실제 크기) */
 function fitZoom() {
   const wrap = $('#pages'), page = $('.page', wrap);
   if (!page) return;
   wrap.style.setProperty('--z', 1);
-  const room = $('#stage').clientWidth - 34;
-  const z = Math.min(1, room / page.offsetWidth);
-  wrap.style.setProperty('--z', z.toFixed(4));
+  const fit = Math.max(0.2, Math.min(1, ($('#stage').clientWidth - 40) / page.offsetWidth));
+  curZ = state.zoom === 'fit' ? fit : state.zoom;
+  wrap.style.setProperty('--z', curZ.toFixed(3));
+  $('#zoomVal').textContent = Math.round(curZ * 100) + '%';
+  $('#zoomFit').setAttribute('aria-pressed', String(state.zoom === 'fit'));
 }
 
 /* ══════════ 왼쪽 목록 ══════════ */
@@ -518,10 +551,22 @@ function renderList() {
   if (!state.items.length) { ol.appendChild(h('li', 'empty', '아직 넣은 글이 없어요.')); return; }
   state.items.forEach((item, i) => {
     const li = h('li', 'item'); li.dataset.id = item.id;
-    const thumb = h('button', 'thumb'); thumb.type = 'button'; thumb.title = '그림 바꾸기';
-    const fillThumb = () => { thumb.innerHTML = ''; if (item.img) thumb.appendChild(picEl(item, '')); else thumb.textContent = '그림 넣기'; };
-    fillThumb(); li._fillThumb = fillThumb;
-    thumb.onclick = () => openPicker(item);
+    const thumbs = h('div', 'thumbs');
+    const fillThumb = () => {
+      thumbs.innerHTML = '';
+      item.imgs.forEach((img, k) => {
+        const t = h('button', 'thumb'); t.type = 'button'; t.title = '그림 바꾸기';
+        t.appendChild(picEl(item, img, '')); t.onclick = () => openPicker(item, k);
+        thumbs.appendChild(t);
+      });
+      if (item.imgs.length < MAX_PICS) {
+        const a = h('button', 'thumb add', item.imgs.length ? '＋' : '그림<br>넣기'); a.type = 'button';
+        a.title = item.imgs.length ? '그림 하나 더 넣기' : '그림 넣기'; a.setAttribute('aria-label', a.title);
+        a.onclick = () => openPicker(item, item.imgs.length);
+        thumbs.appendChild(a);
+      }
+    };
+    fillThumb();
 
     const input = h('input'); input.type = 'text'; input.id = 'txt-' + item.id; input.value = item.text;
     input.placeholder = '글자를 적어 주세요'; input.setAttribute('aria-label', '낱말 또는 문장');
@@ -547,7 +592,8 @@ function renderList() {
       mk('아래로', '↓', () => move(i, 1), i === state.items.length - 1),
       mk('지우기', '✕', () => { state.items.splice(i, 1); render(); }),
     );
-    li.append(thumb, input, tools);
+    const low = h('div', 'item-low'); low.append(thumbs, tools);
+    li.append(input, low);
     ol.appendChild(li);
   });
 }
@@ -561,7 +607,10 @@ function renderControls() {
   $('#pixelN').value = state.pixelN; $('#pixelOut').textContent = `· 가로 ${state.pixelN}칸`;
   $('#showName').checked = state.showName; $('#showQR').checked = state.showQR;
   press('#layoutSeg', 'layout', state.layout); press('#styleSeg', 'style', state.imgStyle);
-  press('#colsSeg', 'cols', state.cols); press('#fontSeg', 'font', state.font); press('#voiceSeg', 'voice', state.voice);
+  press('#colsSeg', 'cols', state.cols); press('#fontSeg', 'font', state.font); press('.voice-seg', 'voice', state.voice);
+  $('#volume').value = Math.round(state.volume * 100); $('#volOut').textContent = `· ${Math.round(state.volume * 100)}%`; press('#multiSeg', 'multi', state.multi ? 1 : 0);
+  $('#fontScale').value = Math.round(state.fontScale * 100); $('#fontOut').textContent = `· ${Math.round(state.fontScale * 100)}%`;
+  $('#wrap').checked = state.wrap;
   $('#colsField').hidden = state.layout !== 'card';
   $('#pixelField').hidden = !state.items.some(it => it.pixel) && state.imgStyle !== 'pixel';
   $('#btnShuffle').hidden = state.layout !== 'match';
@@ -576,10 +625,11 @@ let toastTimer;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200); }
 
 /* ══════════ 그림 고르기 창 ══════════ */
-let pickItem = null, pickIsNew = false, photoToken = 0;
+let pickItem = null, pickIdx = 0, pickIsNew = false, photoToken = 0;
 function choose(img) {
   if (!pickItem) return;
-  pickItem.img = img; pickItem.auto = false; pickItem.pixel = $('#pickPixel').checked;
+  if (img) pickItem.imgs[pickIdx] = img; else pickItem.imgs.splice(pickIdx, 1);
+  pickItem.auto = false; pickItem.pixel = $('#pickPixel').checked;
   const wasNew = pickIsNew, id = pickItem.id;
   pickIsNew = false;
   $('#picker').close();
@@ -614,12 +664,13 @@ function pickGrid(q) {
     });
   }).catch(() => { if (my === photoToken) pg.innerHTML = '<div class="msg">사진을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.</div>'; });
 }
-function openPicker(item, isNew) {
-  pickItem = item; pickIsNew = !!isNew;
-  const q = findEmoji(item.text).key || photoKeys(item.text)[0] || tokens(item.text)[0] || '';
+function openPicker(item, idx = 0, isNew) {
+  pickItem = item; pickIdx = Math.min(idx, item.imgs.length); pickIsNew = !!isNew;
+  const f = findEmoji(item.text);
+  const q = ((item.imgs.length > 1 || pickIdx > 0) && f.keys[pickIdx]) || f.key || photoKeys(item.text)[0] || tokens(item.text)[0] || '';
   $('#pickQ').value = q; $('#pickUrl').value = '';
   $('#pickPixel').checked = isNew ? state.imgStyle === 'pixel' : !!item.pixel;
-  $('#pickNone').hidden = !item.img;
+  $('#pickNone').hidden = !item.imgs[pickIdx];
   pickGrid(q);
   $('#picker').showModal();
 }
@@ -644,11 +695,17 @@ async function chooseFile(file) {
   try { choose({ kind: 'data', src: await fileToDataUrl(file) }); } catch (e) { toast('이 그림은 열 수 없어요. 다른 파일로 해 보세요.'); }
 }
 
+/** 자동으로 붙인 그림을 지금 설정에 맞게 다시 고른다 (직접 고른 그림은 그대로) */
+async function reAuto() {
+  await Promise.all(state.items.filter(it => it.auto && it.text.trim()).map(autoImage));
+  render();
+}
+
 /* ══════════ 단추 잇기 ══════════ */
 function bind() {
   $('#btnAdd').onclick = () => { const ta = $('#inputText'); const lines = ta.value.split('\n'); if (!lines.some(s => s.trim())) { ta.focus(); toast('낱말이나 문장을 먼저 적어 주세요.'); return; } ta.value = ''; addTexts(lines); };
   $('#inputText').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#btnAdd').click(); });
-  $('#btnAddPic').onclick = () => { const it = { id: newId(), text: '', img: null, auto: false, pixel: state.imgStyle === 'pixel' }; state.items.push(it); openPicker(it, true); };
+  $('#btnAddPic').onclick = () => { const it = { id: newId(), text: '', imgs: [], auto: false, pixel: state.imgStyle === 'pixel' }; state.items.push(it); openPicker(it, 0, true); };
   $('#samples').onclick = e => { const k = e.target.dataset.sample; if (k) addTexts(SAMPLES[k]); };
 
   $('#title').oninput = e => { state.title = e.target.value; renderPages(); save(); };
@@ -666,6 +723,9 @@ function bind() {
     await Promise.all(autos.map(autoImage));
     render();
   };
+  $('#multiSeg').onclick = e => { const v = e.target.dataset.multi; if (v == null) return; state.multi = v === '1'; renderControls(); reAuto(); };
+  $('#fontScale').oninput = e => { state.fontScale = +e.target.value / 100; $('#fontOut').textContent = `· ${e.target.value}%`; renderPages(); save(); };
+  $('#wrap').onchange = e => { state.wrap = e.target.checked; render(); };
   $('#pixelN').oninput = e => { state.pixelN = +e.target.value; $('#pixelOut').textContent = `· 가로 ${state.pixelN}칸`; };
   $('#pixelN').onchange = () => render();
   $('#rate').oninput = e => { state.rate = +e.target.value; renderControls(); save(); };
@@ -675,7 +735,19 @@ function bind() {
     if (state.showQR && !/^https?:/.test(location.protocol)) toast('QR은 인터넷 주소(https)로 연 화면에서만 찍혀 나와요.');
   };
   $('#btnShuffle').onclick = () => { state.seed = (state.seed % 9973) + 1; render(); };
-  $('#voiceSeg').onclick = e => { const v = e.target.dataset.voice; if (!v) return; state.voice = v; renderControls(); save(); speakItems([{ id: '', text: v === 'male' ? '남자 목소리로 읽어요.' : '여자 목소리로 읽어요.' }]); };
+  const onVoice = e => { const v = e.target.dataset.voice; if (!v) return; state.voice = v; renderControls(); save(); speakItems([{ id: '', text: v === 'male' ? '남자 목소리로 읽어요.' : '여자 목소리로 읽어요.' }]); };
+  $$('.voice-seg').forEach(el => { el.onclick = onVoice; });
+  $('#volume').oninput = e => { state.volume = +e.target.value / 100; renderControls(); save(); };
+  $('#btnTry').onclick = () => speakItems([{ id: '', text: '안녕하세요. 이 목소리로 읽어 드려요.' }]);
+  const setZoom = z => { state.zoom = z; fitZoom(); save(); };
+  $('#zoomIn').onclick = () => setZoom(Math.min(2, Math.round((curZ + 0.1) * 10) / 10));
+  $('#zoomOut').onclick = () => setZoom(Math.max(0.3, Math.round((curZ - 0.1) * 10) / 10));
+  $('#zoomFit').onclick = () => setZoom('fit');
+  $('#tabs').onclick = e => {
+    const t = e.target.dataset.tab; if (!t) return;
+    $$('#tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+    $$('.pane').forEach(p => { p.hidden = p.dataset.pane !== t; });
+  };
   $('#btnSpeakAll').onclick = () => { if ($('#btnSpeakAll').textContent.startsWith('■')) stopSpeak(); else speakItems(state.items, true); };
   $('#btnPrint').onclick = () => { stopSpeak(); window.print(); };
 
@@ -689,7 +761,7 @@ function bind() {
   $('#fileLoad').onchange = async e => {
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
-    try { const o = JSON.parse(await f.text()); if (!Array.isArray(o.items)) throw 0; state = { ...structuredClone(DEFAULT), ...o }; render(); toast('학습지를 불러왔어요.'); }
+    try { const o = JSON.parse(await f.text()); if (!Array.isArray(o.items)) throw 0; state = norm({ ...structuredClone(DEFAULT), ...o }); render(); toast('학습지를 불러왔어요.'); }
     catch (err) { toast('이 프로그램에서 저장한 파일이 아니에요.'); }
   };
 
@@ -701,13 +773,13 @@ function bind() {
   $('#pickUrlOk').onclick = urlOk;
   $('#pickUrl').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); urlOk(); } });
   $('#pickNone').onclick = () => choose(null);
-  $('#pickPixel').onchange = e => { if (pickItem && pickItem.img) { pickItem.pixel = e.target.checked; render(); } };
+  $('#pickPixel').onchange = e => { if (pickItem && pickItem.imgs.length) { pickItem.pixel = e.target.checked; render(); } };
   $('#picker').addEventListener('paste', e => {
     const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
     if (f) { e.preventDefault(); chooseFile(f); }
   });
   $('#picker').addEventListener('close', () => {
-    if (pickIsNew && pickItem && !pickItem.img) { state.items = state.items.filter(it => it !== pickItem); render(); }
+    if (pickIsNew && pickItem && !pickItem.imgs.length) { state.items = state.items.filter(it => it !== pickItem); render(); }
     pickIsNew = false;
   });
 
@@ -716,7 +788,7 @@ function bind() {
     const url = shareUrl();
     $('#shareUrl').value = url;
     const local = !/^https?:/.test(location.protocol);
-    const lost = state.items.filter(it => it.img && it.img.kind === 'data').length;
+    const lost = state.items.reduce((n, it) => n + it.imgs.filter(im => im.kind === 'data').length, 0);
     const qr = url.length < 2300 ? qrDataUrl(url) : '';
     $('#shareQR').innerHTML = qr && !local ? `<img src="${qr}" alt="학습지 주소 QR">` : '';
     $('#shareNote').textContent = [
@@ -749,16 +821,17 @@ function bind() {
 /* ══════════ 시작 ══════════ */
 function start() {
   const m = location.hash.match(/^#v=(.+)$/);
-  let loaded = false;
+  let loaded = false, redo = false;
   if (m) {
     try { state = fromShare(m[1]); viewer = true; loaded = true; document.body.classList.add('viewer'); }
     catch (e) { toast('주소가 잘못되어 학습지를 열 수 없어요.'); }
   }
   if (!loaded) {
-    try { const o = JSON.parse(localStorage.getItem(LS_KEY)); if (o && Array.isArray(o.items)) { state = { ...structuredClone(DEFAULT), ...o }; loaded = true; } } catch (e) { /* 처음 */ }
+    try { const o = JSON.parse(localStorage.getItem(LS_KEY)); if (o && Array.isArray(o.items)) { state = norm({ ...structuredClone(DEFAULT), ...o }); loaded = true; if (o.multi === undefined) redo = true; } } catch (e) { /* 처음 */ }
   }
   bind();
   render();
+  if (redo) reAuto();
   if (!loaded) addTexts(['사과', '강아지', '나비가 날아요', '나는 아침에 일어나서 학교에 갑니다']);
 }
 window.__ws = { findEmoji, searchEmoji, classify, photoKeys };

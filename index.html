@@ -21,7 +21,7 @@
     </div>
   </div>
   <div class="top-actions">
-    <div class="seg" role="group" aria-label="읽는 목소리" id="voiceSeg">
+    <div class="seg voice-seg" role="group" aria-label="읽는 목소리">
       <button type="button" data-voice="female">여자 목소리</button>
       <button type="button" data-voice="male">남자 목소리</button>
     </div>
@@ -55,65 +55,113 @@
     <section class="step">
       <h2><span class="num">2</span>학습지 꾸미기</h2>
 
-      <label class="field"><span>제목</span>
-        <input type="text" id="title" maxlength="40">
-      </label>
-
-      <div class="field"><span>학습지 종류</span>
-        <div class="seg full" id="layoutSeg">
-          <button type="button" data-layout="card">그림 카드</button>
-          <button type="button" data-layout="trace">따라 쓰기</button>
-          <button type="button" data-layout="match">선 잇기</button>
-        </div>
+      <div class="tabs" id="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="shape" aria-selected="true">모양</button>
+        <button type="button" role="tab" data-tab="pic" aria-selected="false">그림</button>
+        <button type="button" role="tab" data-tab="type" aria-selected="false">글씨</button>
+        <button type="button" role="tab" data-tab="sound" aria-selected="false">소리</button>
       </div>
 
-      <div class="field"><span>그림 모양</span>
-        <div class="seg full" id="styleSeg">
-          <button type="button" data-style="noto">구글 그림</button>
-          <button type="button" data-style="pixel">도트 그림</button>
-          <button type="button" data-style="photo">사진</button>
+      <!-- 모양 -->
+      <div class="pane" data-pane="shape">
+        <div class="field"><span>학습지 종류</span>
+          <div class="tiles" id="layoutSeg">
+            <button type="button" data-layout="card">
+              <svg viewBox="0 0 44 30" aria-hidden="true"><rect x="2" y="2" width="18" height="26" rx="3"/><rect x="24" y="2" width="18" height="26" rx="3"/><circle cx="11" cy="11" r="4.5" class="f"/><circle cx="33" cy="11" r="4.5" class="f"/><path d="M6 22h10M28 22h10"/></svg>
+              <b>그림 카드</b><small>보고 읽기</small>
+            </button>
+            <button type="button" data-layout="trace">
+              <svg viewBox="0 0 44 30" aria-hidden="true"><circle cx="7" cy="9" r="4.5" class="f"/><path d="M15 3h27v11H15zM24 3v11M33 3v11M15 17h27v11H15zM24 17v11M33 17v11"/></svg>
+              <b>따라 쓰기</b><small>네모 칸에 쓰기</small>
+            </button>
+            <button type="button" data-layout="match">
+              <svg viewBox="0 0 44 30" aria-hidden="true"><circle cx="6" cy="7" r="4" class="f"/><circle cx="6" cy="23" r="4" class="f"/><path d="M12 7l18 16M12 23L30 7M32 4h10v6H32zM32 20h10v6H32z"/></svg>
+              <b>선 잇기</b><small>그림과 글 잇기</small>
+            </button>
+          </div>
         </div>
+
+        <div class="field" id="colsField"><span>한 줄에 놓을 카드</span>
+          <div class="seg full" id="colsSeg">
+            <button type="button" data-cols="1">1장</button>
+            <button type="button" data-cols="2">2장</button>
+            <button type="button" data-cols="3">3장</button>
+          </div>
+        </div>
+        <button type="button" class="btn small" id="btnShuffle">선 잇기 순서 다시 섞기</button>
+
+        <label class="field"><span>제목</span>
+          <input type="text" id="title" maxlength="40">
+        </label>
+        <label class="field"><span>안내 문구</span>
+          <input type="text" id="guide" maxlength="60">
+        </label>
+        <div class="row wrap checks">
+          <label><input type="checkbox" id="showName"> 이름·날짜 칸</label>
+          <label><input type="checkbox" id="showQR"> 소리 듣기 QR</label>
+        </div>
+        <p class="note">종이는 항상 A4 세로 크기로 인쇄돼요.</p>
       </div>
 
-      <label class="field" id="pixelField"><span>도트 크기 <output id="pixelOut"></output></span>
-        <input type="range" id="pixelN" min="16" max="64" step="4">
-      </label>
-
-      <div class="field" id="colsField"><span>한 줄에 놓을 카드</span>
-        <div class="seg full" id="colsSeg">
-          <button type="button" data-cols="1">1장</button>
-          <button type="button" data-cols="2">2장</button>
-          <button type="button" data-cols="3">3장</button>
+      <!-- 그림 -->
+      <div class="pane" data-pane="pic" hidden>
+        <div class="field"><span>그림 모양</span>
+          <div class="seg full" id="styleSeg">
+            <button type="button" data-style="noto">구글 그림</button>
+            <button type="button" data-style="pixel">도트 그림</button>
+            <button type="button" data-style="photo">사진</button>
+          </div>
         </div>
+        <div class="field"><span>문장에 넣을 그림</span>
+          <div class="seg full" id="multiSeg">
+            <button type="button" data-multi="0">1개 크게</button>
+            <button type="button" data-multi="1">여러 개 작게</button>
+          </div>
+        </div>
+        <label class="field" id="pixelField"><span>도트 크기 <output id="pixelOut"></output></span>
+          <input type="range" id="pixelN" min="16" max="64" step="4">
+        </label>
+        <p class="note">학습지나 아래 목록에서 그림을 누르면 다른 그림으로 바꾸거나 내 그림을 넣을 수 있어요.</p>
       </div>
 
-      <div class="field"><span>글씨체</span>
-        <div class="seg full" id="fontSeg">
-          <button type="button" data-font="gothic">고딕</button>
-          <button type="button" data-font="hand">손글씨</button>
-          <button type="button" data-font="serif">명조</button>
+      <!-- 글씨 -->
+      <div class="pane" data-pane="type" hidden>
+        <div class="field"><span>글씨체</span>
+          <div class="seg full" id="fontSeg">
+            <button type="button" data-font="gothic">고딕</button>
+            <button type="button" data-font="hand">손글씨</button>
+            <button type="button" data-font="serif">명조</button>
+          </div>
         </div>
+        <label class="field"><span>글씨 크기 <output id="fontOut"></output></span>
+          <input type="range" id="fontScale" min="60" max="160" step="5">
+        </label>
+        <label class="check"><input type="checkbox" id="wrap"> 긴 문장 자동 줄바꿈</label>
+        <p class="note">줄바꿈을 끄면 문장을 한 줄에 두고, 칸에 맞게 글씨를 줄여요.</p>
       </div>
 
-      <label class="field"><span>읽는 빠르기 <output id="rateOut"></output></span>
-        <input type="range" id="rate" min="0.5" max="1.3" step="0.05">
-      </label>
-      <p class="note" id="voiceNote"></p>
-
-      <label class="field"><span>안내 문구</span>
-        <input type="text" id="guide" maxlength="60">
-      </label>
-
-      <div class="row wrap checks">
-        <label><input type="checkbox" id="showName"> 이름·날짜 칸</label>
-        <label><input type="checkbox" id="showQR"> 소리 듣기 QR</label>
-        <button type="button" class="btn small" id="btnShuffle">선 잇기 다시 섞기</button>
+      <!-- 소리 -->
+      <div class="pane" data-pane="sound" hidden>
+        <div class="field"><span>목소리</span>
+          <div class="seg full voice-seg">
+            <button type="button" data-voice="female">여자</button>
+            <button type="button" data-voice="male">남자</button>
+          </div>
+        </div>
+        <label class="field"><span>목소리 크기 <output id="volOut"></output></span>
+          <input type="range" id="volume" min="10" max="100" step="5">
+        </label>
+        <label class="field"><span>읽는 빠르기 <output id="rateOut"></output></span>
+          <input type="range" id="rate" min="0.5" max="1.3" step="0.05">
+        </label>
+        <button type="button" class="btn small" id="btnTry">▶ 들어 보기</button>
+        <p class="note" id="voiceNote"></p>
       </div>
     </section>
 
     <section class="step">
       <h2><span class="num">3</span>낱말·문장 다듬기 <span class="count" id="count"></span></h2>
-      <p class="hint">그림을 누르면 다른 그림으로 바꿀 수 있어요.</p>
+      <p class="hint">그림을 누르면 바꿀 수 있고, ＋를 누르면 그림을 더 넣을 수 있어요(4개까지).</p>
       <ol class="items" id="items"></ol>
       <div class="row wrap">
         <button type="button" class="btn small" id="btnSave">파일로 저장</button>
@@ -136,6 +184,13 @@
     <div id="pages"></div>
   </section>
 </main>
+
+<div class="zoombar no-print" role="group" aria-label="화면 크기">
+  <button type="button" id="zoomOut" aria-label="화면 작게" title="화면 작게">−</button>
+  <output id="zoomVal">100%</output>
+  <button type="button" id="zoomIn" aria-label="화면 크게" title="화면 크게">＋</button>
+  <button type="button" id="zoomFit" class="fit" title="창 너비에 맞추기">화면 맞춤</button>
+</div>
 
 <!-- 그림 고르기 -->
 <dialog id="picker" class="modal no-print">
@@ -169,7 +224,7 @@
   </div>
   <div class="modal-foot">
     <label><input type="checkbox" id="pickPixel"> 도트 그림으로 바꾸기</label>
-    <button type="button" class="btn danger" id="pickNone">그림 빼기</button>
+    <button type="button" class="btn danger" id="pickNone">이 그림 빼기</button>
   </div>
 </dialog>
 
