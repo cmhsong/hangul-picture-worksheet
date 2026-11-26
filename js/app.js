@@ -22,7 +22,7 @@ const SAMPLES = {
 const DEFAULT = {
   title: '한글 읽기 · 쓰기', layout: 'card', cols: 2, imgStyle: 'noto', pixelN: 32,
   voice: 'female', rate: 0.85, showName: true, showQR: false, font: 'gothic',
-  guide: {}, seed: 1, multi: true, fontScale: 1, wrap: true, volume: 1, zoom: 'fit', items: [],
+  guide: {}, seed: 1, multi: true, fontScale: 1, wrap: true, volume: 1, zoom: 'fit', traceMode: 'sentence', items: [],
 };
 
 let state = structuredClone(DEFAULT);
@@ -106,7 +106,13 @@ function findEmoji(text) {
   ordered.forEach(h => list.push(...h.list.slice(1, 8)));
   const heads = [], keys = []; // 글에 나온 순서대로, 낱말마다 하나씩
   hits.forEach(h => { if (!heads.includes(h.list[0])) { heads.push(h.list[0]); keys.push(h.key); } });
-  return { list: [...new Set(list)], key: ordered[0]?.key || '', heads, keys };
+  return { list: [...new Set(list)], key: ordered[0]?.key || '', heads, keys, nouns: hits.filter(h => !h.verb).map(h => h.key) };
+}
+/** 문장에서 따로 떼어 쓸 핵심 낱말(이름씨 먼저, 없으면 긴 마디) */
+function keyWords(text) {
+  let ws = findEmoji(text).nouns;
+  if (!ws.length) ws = tokens(text).filter(t => t.length >= 2).slice(0, 2);
+  return [...new Set(ws)].slice(0, 4);
 }
 /** 고르기 창에서 쓰는 넓은 찾기(포함하는 이름까지). */
 function searchEmoji(q) {
@@ -387,6 +393,91 @@ function fitText(block) {
   });
 }
 
+/* ══════════ 화면에서 바로 쓰기 · 선 잇기 (손가락, 펜, 마우스) ══════════ */
+const ink = new Map();   // '항목id:줄번호' → 획 목록 (칸 하나가 100×100인 좌표)
+const links = new Map(); // 왼쪽 그림 id → 오른쪽 글 id
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs = {}) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+/** 따라 쓰기 한 줄 위에 얹는 투명 필기판 */
+function inkLayer(key, cols) {
+  const svg = svgEl('svg', { class: 'ink', viewBox: `0 0 ${cols * 100} 100`, preserveAspectRatio: 'none' });
+  const draw = pts => svgEl('polyline', { points: pts.join(' ') });
+  (ink.get(key) || []).forEach(p => svg.appendChild(draw(p)));
+  let cur = null, line = null;
+  const pos = e => { const r = svg.getBoundingClientRect(); return [+((e.clientX - r.left) / r.width * cols * 100).toFixed(1), +((e.clientY - r.top) / r.height * 100).toFixed(1)]; };
+  svg.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    e.preventDefault();
+    try { svg.setPointerCapture(e.pointerId); } catch (err) { /* 일부 기기 */ }
+    cur = [...pos(e), ...pos(e)];
+    line = draw(cur); svg.appendChild(line);
+  });
+  svg.addEventListener('pointermove', e => { if (!cur) return; cur.push(...pos(e)); line.setAttribute('points', cur.join(' ')); });
+  const end = () => { if (!cur) return; const list = ink.get(key) || []; list.push(cur); ink.set(key, list); cur = null; };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  return svg;
+}
+
+/** 선 잇기: 점을 끌어다 놓거나, 두 점을 차례로 누른다 */
+let drag = null, armed = null;
+const groupXY = (g, cx, cy) => { const r = g.getBoundingClientRect(), k = 1000 / r.width; return [((cx - r.left) * k).toFixed(1), ((cy - r.top) * k).toFixed(1)]; };
+const dotXY = (dot, g) => { const r = dot.getBoundingClientRect(); return groupXY(g, r.left + r.width / 2, r.top + r.height / 2); };
+function drawLinks() {
+  $$('.mgroup').forEach(g => {
+    const svg = $('.wires', g), r = g.getBoundingClientRect();
+    if (!svg || !r.width) return;
+    svg.setAttribute('viewBox', `0 0 1000 ${(1000 * r.height / r.width).toFixed(1)}`);
+    svg.innerHTML = '';
+    $$('.dot[data-side="l"]', g).forEach(d => {
+      const to = links.get(d.dataset.item);
+      const t = to && $(`.dot[data-side="r"][data-item="${to}"]`, g);
+      if (!t) return;
+      const [x1, y1] = dotXY(d, g), [x2, y2] = dotXY(t, g);
+      svg.appendChild(svgEl('line', { x1, y1, x2, y2 }));
+    });
+  });
+}
+function setArmed(dot) { if (armed) armed.classList.remove('sel'); armed = dot; if (dot) dot.classList.add('sel'); }
+function connect(a, b) {
+  const l = a.dataset.side === 'l' ? a : b, r = l === a ? b : a;
+  for (const [k, v] of links) if (v === r.dataset.item) links.delete(k); // 글 하나에는 선 하나
+  links.set(l.dataset.item, r.dataset.item);
+  setArmed(null);
+  drawLinks();
+}
+function bindLinking() {
+  $('#pages').addEventListener('pointerdown', e => {
+    const dot = e.target.closest('.dot');
+    if (!dot || e.button) return;
+    e.preventDefault();
+    const g = dot.closest('.mgroup'), [x, y] = dotXY(dot, g);
+    const line = svgEl('line', { class: 'temp', x1: x, y1: y, x2: x, y2: y });
+    $('.wires', g).appendChild(line);
+    drag = { dot, g, line };
+  });
+  window.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const [x, y] = groupXY(drag.g, e.clientX, e.clientY);
+    drag.line.setAttribute('x2', x); drag.line.setAttribute('y2', y);
+  });
+  const up = e => {
+    if (!drag) return;
+    const { dot, g, line } = drag; drag = null; line.remove();
+    const hit = e.type === 'pointerup' ? document.elementFromPoint(e.clientX, e.clientY)?.closest('.dot, .mrow .l, .mrow .r') : null;
+    const to = !hit ? null : hit.classList.contains('dot') ? hit : $(`.dot[data-side="${hit.classList.contains('l') ? 'l' : 'r'}"]`, hit.closest('.mrow'));
+    const pair = (a, b) => a && b && a !== b && a.isConnected && a.closest('.mgroup') === b.closest('.mgroup') && a.dataset.side !== b.dataset.side;
+    if (pair(dot, to)) connect(dot, to);            // 끌어서 놓기
+    else if (to === dot) {                           // 눌렀다 떼기: 두 점을 차례로
+      if (pair(armed, dot)) connect(armed, dot); else setArmed(armed === dot ? null : dot);
+    }
+  };
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+  $('#btnErase').onclick = () => { ink.clear(); links.clear(); setArmed(null); renderPages(); toast('쓴 글씨와 이은 선을 지웠어요.'); };
+}
+
 function cardBlock(item) {
   const type = classify(item.text);
   const el = h('div', `card t-${type}${item.imgs.length ? '' : ' no-pic'}`);
@@ -397,28 +488,47 @@ function cardBlock(item) {
 }
 function traceBlock(item) {
   const type = classify(item.text);
-  const b = Math.min(22, Math.round((type === 'word' ? 14 : type === 'short' ? 11 : 9.5) * state.fontScale * 10) / 10);
-  const per = Math.max(2, Math.floor((item.imgs.length ? 146 : 180) / b)); // 한 줄 칸 수 — 넘치면 다음 줄로
-  const chars = Array.from(item.text.trim());
-  const lines = [];
-  let cur = [];
-  chars.forEach(c => {
-    if (!cur.length && c === ' ') return;
-    cur.push(c);
-    if (cur.length === per) { lines.push(cur); cur = []; }
-  });
-  if (cur.length) lines.push(cur);
+  // 칸 크기(mm): 낱말만 쓸 때는 크게(big), 문장과 함께 쓸 때는 보통
+  const size = t => Math.min(30, Math.round((t === 'big' ? 20 : t === 'word' ? 14 : t === 'short' ? 11 : 9.5) * state.fontScale * 10) / 10);
+  const fitOne = (b, n) => Math.min(b, Math.floor(width / Math.max(1, n) * 10) / 10); // 낱말이 한 줄에 들어가게
+  const width = item.imgs.length ? 146 : 180; // 칸을 놓을 수 있는 너비(mm)
+  const row = (chars, ghost) => h('div', 'boxes' + (ghost ? '' : ' blank'), chars.map(c => `<span>${ghost && c !== ' ' ? esc(c) : ''}</span>`).join(''));
   const el = h('div', 'trow'); el.dataset.id = item.id;
   if (item.imgs.length) el.appendChild(picsEl(item));
-  const tl = h('div', 'tlines'); tl.style.setProperty('--b', b + 'mm');
+  const tl = h('div', 'tlines');
   const read = h('div', 'tread', esc(item.text));
   read.appendChild(sayBtn(item));
   tl.appendChild(read);
-  lines.forEach(line => {
-    tl.appendChild(h('div', 'boxes', line.map(c => `<span>${c === ' ' ? '' : esc(c)}</span>`).join('')));
-    tl.appendChild(h('div', 'boxes blank', line.map(() => '<span></span>').join('')));
-  });
-  if (type === 'word') tl.appendChild(h('div', 'boxes blank', lines[0].map(() => '<span></span>').join('')));
+  // 낱말은 그대로, 문장은 설정에 따라: 문장 전체 / 핵심 낱말 / 둘 다
+  const mode = type === 'word' ? 'sentence' : state.traceMode;
+  if (mode !== 'words') {
+    const b = type === 'word' ? fitOne(size('big'), Array.from(item.text.trim()).length) : size(type);
+    const per = Math.max(2, Math.floor(width / b)); // 한 줄 칸 수 — 넘치면 다음 줄로
+    const lines = []; let cur = [];
+    Array.from(item.text.trim()).forEach(c => {
+      if (!cur.length && c === ' ') return;
+      cur.push(c);
+      if (cur.length === per) { lines.push(cur); cur = []; }
+    });
+    if (cur.length) lines.push(cur);
+    const part = h('div', 'tpart'); part.style.setProperty('--b', b + 'mm');
+    lines.forEach(line => part.append(row(line, true), row(line, false)));
+    if (type === 'word' && lines[0]) part.appendChild(row(lines[0], false));
+    tl.appendChild(part);
+  }
+  if (mode !== 'sentence') {
+    const base = size(mode === 'both' ? 'word' : 'big');
+    const part = h('div', 'tpart twords');
+    if (mode === 'both') part.appendChild(h('div', 'tlabel', '핵심 낱말'));
+    keyWords(item.text).forEach(w => {
+      const chars = Array.from(w), g = h('div', 'tword');
+      g.style.setProperty('--b', fitOne(base, chars.length) + 'mm');
+      g.append(row(chars, true), row(chars, false));
+      part.appendChild(g);
+    });
+    tl.appendChild(part);
+  }
+  $$('.boxes', tl).forEach((bx, r) => bx.appendChild(inkLayer(item.id + ':' + mode + r, bx.children.length)));
   el.appendChild(tl);
   return el;
 }
@@ -440,9 +550,12 @@ function matchBlocks(items) {
       l.appendChild(picsEl(it)); l.appendChild(sayBtn(it));
       const rt = right[i];
       const r = h('div', `r t-${classify(rt.text)}`, esc(rt.text)); r.dataset.id = rt.id;
-      row.append(l, h('span', 'dot'), h('span'), h('span', 'dot'), r);
+      const dl = h('span', 'dot'), dr = h('span', 'dot');
+      dl.dataset.side = 'l'; dl.dataset.item = it.id; dr.dataset.side = 'r'; dr.dataset.item = rt.id;
+      row.append(l, dl, h('span'), dr, r);
       el.appendChild(row);
     });
+    el.appendChild(svgEl('svg', { class: 'wires' }));
     out.push(el);
   }
   return out;
@@ -451,7 +564,7 @@ function matchBlocks(items) {
 function shareUrl() {
   const slim = {
     t: state.title, l: state.layout, c: state.cols, s: state.imgStyle, p: state.pixelN, v: state.voice, r: state.rate,
-    n: state.showName ? 1 : 0, f: state.font, g: state.guide, d: state.seed, z: state.fontScale, w: state.wrap ? 1 : 0,
+    n: state.showName ? 1 : 0, f: state.font, g: state.guide, d: state.seed, z: state.fontScale, w: state.wrap ? 1 : 0, k: state.traceMode,
     i: state.items.map(it => [it.text, it.imgs.map(im => im.kind === 'emoji' ? 'e:' + im.ch : im.kind === 'url' ? 'u:' + im.src : '').filter(Boolean), it.pixel ? 1 : 0]),
   };
   return location.href.split('#')[0] + '#v=' + LZString.compressToEncodedURIComponent(JSON.stringify(slim));
@@ -460,7 +573,7 @@ function fromShare(code) {
   const o = JSON.parse(LZString.decompressFromEncodedURIComponent(code));
   return {
     ...structuredClone(DEFAULT), title: o.t, layout: o.l, cols: o.c, imgStyle: o.s, pixelN: o.p, voice: o.v, rate: o.r,
-    showName: !!o.n, font: o.f, guide: o.g || {}, seed: o.d || 1, fontScale: o.z || 1, wrap: o.w !== 0,
+    showName: !!o.n, font: o.f, guide: o.g || {}, seed: o.d || 1, fontScale: o.z || 1, wrap: o.w !== 0, traceMode: o.k || 'sentence',
     items: (o.i || []).map(([text, im, px]) => ({
       id: newId(), text, pixel: !!px, auto: false,
       imgs: (Array.isArray(im) ? im : im ? [im] : []).map(c => c.startsWith('e:') ? { kind: 'emoji', ch: c.slice(2) } : { kind: 'url', src: c.slice(2) }),
@@ -529,6 +642,8 @@ function renderPages() {
   }
   pages.forEach((p, i) => { $('.pn', p).textContent = `${i + 1} / ${pages.length}`; });
   fitZoom();
+  armed = null;
+  drawLinks();
 }
 let curZ = 1;
 /** 미리 보기 크기: '화면 맞춤'이면 창 너비에 맞추고, 아니면 고른 배율 그대로 (인쇄는 늘 A4 실제 크기) */
@@ -612,6 +727,7 @@ function renderControls() {
   $('#fontScale').value = Math.round(state.fontScale * 100); $('#fontOut').textContent = `· ${Math.round(state.fontScale * 100)}%`;
   $('#wrap').checked = state.wrap;
   $('#colsField').hidden = state.layout !== 'card';
+  $('#traceField').hidden = state.layout !== 'trace'; press('#traceSeg', 'trace', state.traceMode);
   $('#pixelField').hidden = !state.items.some(it => it.pixel) && state.imgStyle !== 'pixel';
   $('#btnShuffle').hidden = state.layout !== 'match';
   voiceNote();
@@ -711,6 +827,7 @@ function bind() {
   $('#title').oninput = e => { state.title = e.target.value; renderPages(); save(); };
   $('#guide').oninput = e => { const v = e.target.value.trim(); if (v && v !== GUIDES[state.layout]) state.guide[state.layout] = v; else delete state.guide[state.layout]; renderPages(); save(); };
   $('#layoutSeg').onclick = e => { const v = e.target.dataset.layout; if (v) { state.layout = v; render(); } };
+  $('#traceSeg').onclick = e => { const v = e.target.dataset.trace; if (v) { state.traceMode = v; render(); } };
   $('#colsSeg').onclick = e => { const v = e.target.dataset.cols; if (v) { state.cols = +v; render(); } };
   $('#fontSeg').onclick = e => { const v = e.target.dataset.font; if (v) { state.font = v; render(); } };
   $('#styleSeg').onclick = async e => {
@@ -812,6 +929,7 @@ function bind() {
     render();
   };
 
+  bindLinking();
   window.addEventListener('resize', fitZoom);
   window.addEventListener('beforeprint', stopSpeak);
   if (synth) { loadVoices(); synth.addEventListener?.('voiceschanged', loadVoices); }

@@ -88,6 +88,13 @@
             <button type="button" data-cols="3">3장</button>
           </div>
         </div>
+        <div class="field" id="traceField"><span>문장은 무엇을 따라 쓸까요</span>
+          <div class="seg full" id="traceSeg">
+            <button type="button" data-trace="sentence">문장 전체</button>
+            <button type="button" data-trace="words">핵심 낱말</button>
+            <button type="button" data-trace="both">둘 다</button>
+          </div>
+        </div>
         <button type="button" class="btn small" id="btnShuffle">선 잇기 순서 다시 섞기</button>
 
         <label class="field"><span>제목</span>
@@ -100,6 +107,7 @@
           <label><input type="checkbox" id="showName"> 이름·날짜 칸</label>
           <label><input type="checkbox" id="showQR"> 소리 듣기 QR</label>
         </div>
+        <p class="note">화면에서 바로 풀 수 있어요. 따라 쓰기는 손가락·펜·마우스로 칸에 쓰고, 선 잇기는 점을 끌어다 놓거나 두 점을 차례로 눌러요.</p>
         <p class="note">종이는 항상 A4 세로 크기로 인쇄돼요.</p>
       </div>
 
@@ -190,6 +198,7 @@
   <output id="zoomVal">100%</output>
   <button type="button" id="zoomIn" aria-label="화면 크게" title="화면 크게">＋</button>
   <button type="button" id="zoomFit" class="fit" title="창 너비에 맞추기">화면 맞춤</button>
+  <button type="button" id="btnErase" class="fit erase" title="화면에서 쓴 글씨와 이은 선 지우기">쓴 것 지우기</button>
 </div>
 
 <!-- 그림 고르기 -->
