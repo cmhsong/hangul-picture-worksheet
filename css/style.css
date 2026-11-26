@@ -124,6 +124,8 @@ main { flex: 1; min-height: 0; display: flex; }
   border-right: 1px solid var(--line);
 }
 .stage { flex: 1; min-width: 0; overflow: auto; padding: 24px 20px 90px; }
+.panel-closed .panel { display: none; }
+.panel-closed #btnPanel { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 
 .step {
   padding: 16px; display: flex; flex-direction: column; gap: 11px;

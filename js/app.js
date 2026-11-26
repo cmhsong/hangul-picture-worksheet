@@ -929,6 +929,19 @@ function bind() {
     render();
   };
 
+  // 왼쪽 설정 칸: 필요할 때만 열어 쓴다 (이 기기에 기억)
+  const setPanel = open => {
+    document.body.classList.toggle('panel-closed', !open);
+    const b = $('#btnPanel');
+    b.textContent = open ? '◀ 설정 숨기기' : '▶ 설정 열기';
+    b.setAttribute('aria-expanded', String(open));
+    fitZoom();
+    try { localStorage.setItem(LS_KEY + '-panel', open ? '1' : '0'); } catch (e) { /* 기억 못 해도 동작 */ }
+  };
+  $('#btnPanel').onclick = () => setPanel(document.body.classList.contains('panel-closed'));
+  let panelOpen = true;
+  try { panelOpen = localStorage.getItem(LS_KEY + '-panel') !== '0'; } catch (e) { /* 처음 */ }
+  setPanel(panelOpen);
   bindLinking();
   window.addEventListener('resize', fitZoom);
   window.addEventListener('beforeprint', stopSpeak);
